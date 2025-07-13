@@ -49,7 +49,7 @@ public class CourseDocument {
     @Field(type = FieldType.Double)
     private double price;
 
-    @Field(type = FieldType.Date, format = DateFormat.date_time)
+    @Field(type = FieldType.Date, format = DateFormat.strict_date_time)
     private Instant nextSessionDate;
 
     @CompletionField
