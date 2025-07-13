@@ -1,6 +1,7 @@
 package com.abhishek.coursesearch.controller;
 
 import java.time.Instant;
+import java.util.List;
 
 import com.abhishek.coursesearch.model.SearchResponse;
 import com.abhishek.coursesearch.service.SearchService;
@@ -35,4 +36,10 @@ public class SearchController {
         return searchService.searchCourses(q, minAge, maxAge, category, type,
                 minPrice, maxPrice, startDate, sort, page, size);
     }
+
+    @GetMapping("/suggest")
+    public List<String> suggestTitles(@RequestParam String q) {
+        return searchService.suggestTitles(q);
+    }
+
 }

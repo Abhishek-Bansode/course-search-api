@@ -7,18 +7,22 @@ import java.util.List;
 import co.elastic.clients.elasticsearch._types.query_dsl.BoolQuery;
 import co.elastic.clients.elasticsearch._types.query_dsl.DateRangeQuery;
 import co.elastic.clients.elasticsearch._types.query_dsl.MatchQuery;
-import co.elastic.clients.elasticsearch._types.query_dsl.MultiMatchQuery;
 import co.elastic.clients.elasticsearch._types.query_dsl.NumberRangeQuery;
 import co.elastic.clients.elasticsearch._types.query_dsl.Query;
 import co.elastic.clients.elasticsearch._types.query_dsl.RangeQuery;
+import co.elastic.clients.elasticsearch.core.search.CompletionSuggester;
+import co.elastic.clients.elasticsearch.core.search.FieldSuggester;
+import co.elastic.clients.elasticsearch.core.search.Suggester;
 import com.abhishek.coursesearch.model.CourseDocument;
 import com.abhishek.coursesearch.model.SearchResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.data.elasticsearch.client.elc.NativeQuery;
 import org.springframework.data.elasticsearch.core.ElasticsearchOperations;
 import org.springframework.data.elasticsearch.core.SearchHit;
 import org.springframework.data.elasticsearch.core.SearchHits;
+import org.springframework.data.elasticsearch.core.suggest.response.Suggest;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -36,11 +40,23 @@ public class SearchService {
         List<Query> mustQueries = new ArrayList<>();
         List<Query> filterQueries = new ArrayList<>();
 
-        // Full-text search on title and description
+        // Full-text search with fuzzy match on title, normal on description
         if (q != null && !q.isBlank()) {
-            mustQueries.add(MultiMatchQuery.of(m -> m
-                .fields("title", "description")
-                .query(q)
+            Query fuzzyTitle = MatchQuery.of(m -> m
+                    .field("title")
+                    .query(q)
+                    .fuzziness("AUTO")  // Enable fuzzy match (e.g., 'dinors' ~ 'Dinosaurs')
+            )._toQuery();
+
+            Query normalDescription = MatchQuery.of(m -> m
+                    .field("description")
+                    .query(q)
+            )._toQuery();
+
+            mustQueries.add(BoolQuery.of(b -> b
+                    .should(fuzzyTitle)
+                    .should(normalDescription)
+                    .minimumShouldMatch("1")
             )._toQuery());
         }
 
@@ -105,11 +121,11 @@ public class SearchService {
 
         // Sorting
         if ("priceAsc".equalsIgnoreCase(sort)) {
-            query.addSort(org.springframework.data.domain.Sort.by("price").ascending());
+            query.addSort(Sort.by("price").ascending());
         } else if ("priceDesc".equalsIgnoreCase(sort)) {
-            query.addSort(org.springframework.data.domain.Sort.by("price").descending());
+            query.addSort(Sort.by("price").descending());
         } else {
-            query.addSort(org.springframework.data.domain.Sort.by("nextSessionDate").ascending());
+            query.addSort(Sort.by("nextSessionDate").ascending());
         }
 
         // Execute the search
@@ -118,4 +134,41 @@ public class SearchService {
 
         return new SearchResponse(hits.getTotalHits(), results);
     }
+
+    public List<String> suggestTitles(String q) {
+        // Build the suggester using Completion field
+        Suggester suggester = Suggester.of(s -> s
+                .text(q) // <-- prefix passed globally
+                .suggesters("title-suggest", FieldSuggester.of(fs -> fs
+                        .completion(CompletionSuggester.of(cs -> cs
+                                .field("suggest")
+                                .skipDuplicates(true)
+                                .size(10)
+                        ))
+                ))
+        );
+
+        // Create NativeQuery with Suggester
+        NativeQuery query = NativeQuery.builder()
+                .withSuggester(suggester)
+                .build();
+
+        // Perform the suggest query
+        SearchHits<CourseDocument> hits = elasticsearchOperations.search(query, CourseDocument.class);
+
+        // Extract and flatten the suggestions
+        Suggest suggest = hits.getSuggest();
+
+        if (suggest != null && suggest.getSuggestion("title-suggest") != null) {
+            return suggest.getSuggestion("title-suggest") // get the Suggestion object by name
+                    .getEntries()                         // get its entries
+                    .stream()
+                    .flatMap(entry -> entry.getOptions().stream()) // flatten all options
+                    .map(Suggest.Suggestion.Entry.Option::getText)               // extract the suggestion text
+                    .toList();
+        }
+
+        return List.of();
+    }
+
 }

@@ -1,16 +1,19 @@
 package com.abhishek.coursesearch.model;
 
 import java.time.Instant;
+import java.util.List;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.springframework.data.annotation.Id;
+import org.springframework.data.elasticsearch.annotations.CompletionField;
 import org.springframework.data.elasticsearch.annotations.DateFormat;
 import org.springframework.data.elasticsearch.annotations.Document;
 import org.springframework.data.elasticsearch.annotations.Field;
 import org.springframework.data.elasticsearch.annotations.FieldType;
+import org.springframework.data.elasticsearch.core.suggest.Completion;
 
 @Data
 @AllArgsConstructor
@@ -48,4 +51,13 @@ public class CourseDocument {
 
     @Field(type = FieldType.Date, format = DateFormat.date_time)
     private Instant nextSessionDate;
+
+    @CompletionField
+    private Completion suggest;
+
+    // Optional helper constructor for setting suggest field if needed manually
+    public void initializeSuggest() {
+        suggest = new Completion(List.of(title));
+    }
+
 }

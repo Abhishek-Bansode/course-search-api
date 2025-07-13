@@ -32,6 +32,7 @@ public class CourseDataLoader implements ApplicationRunner {
             }
 
             List<CourseDocument> courses = objectMapper.readValue(is, new TypeReference<>() {});
+            courses.forEach(CourseDocument::initializeSuggest);
             courseRepository.saveAll(courses);
             log.info("Successfully indexed {} courses into Elasticsearch.", courses.size());
         } catch (Exception e) {
