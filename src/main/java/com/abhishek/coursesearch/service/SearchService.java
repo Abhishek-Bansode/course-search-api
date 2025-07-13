@@ -3,6 +3,7 @@ package com.abhishek.coursesearch.service;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.Collectors;
 
 import co.elastic.clients.elasticsearch._types.query_dsl.BoolQuery;
 import co.elastic.clients.elasticsearch._types.query_dsl.DateRangeQuery;
@@ -37,98 +38,18 @@ public class SearchService {
                                         Instant startDate,
                                         String sort, int page, int size) {
 
-        List<Query> mustQueries = new ArrayList<>();
-        List<Query> filterQueries = new ArrayList<>();
+        List<Query> mustQueries = buildMustQueries(q);
+        List<Query> filterQueries = buildFilterQueries(minAge, maxAge, category, type, minPrice, maxPrice, startDate);
 
-        // Full-text search with fuzzy match on title, normal on description
-        if (q != null && !q.isBlank()) {
-            Query fuzzyTitle = MatchQuery.of(m -> m
-                    .field("title")
-                    .query(q)
-                    .fuzziness("AUTO")  // Enable fuzzy match (e.g., 'dinors' ~ 'Dinosaurs')
-            )._toQuery();
+        BoolQuery boolQuery = BoolQuery.of(b -> b.must(mustQueries).filter(filterQueries));
 
-            Query normalDescription = MatchQuery.of(m -> m
-                    .field("description")
-                    .query(q)
-            )._toQuery();
-
-            mustQueries.add(BoolQuery.of(b -> b
-                    .should(fuzzyTitle)
-                    .should(normalDescription)
-                    .minimumShouldMatch("1")
-            )._toQuery());
-        }
-
-        // Exact matches using keyword fields
-        if (category != null && !category.isBlank()) {
-            filterQueries.add(MatchQuery.of(m -> m
-                    .field("category")
-                    .query(category)
-            )._toQuery());
-        }
-
-        if (type != null && !type.isBlank()) {
-            filterQueries.add(MatchQuery.of(m -> m
-                    .field("type")
-                    .query(type)
-            )._toQuery());
-        }
-
-        // Age Range
-        if (minAge != null || maxAge != null) {
-            NumberRangeQuery ageRange = new NumberRangeQuery.Builder()
-                .field("minAge")
-                .gte(minAge != null ? minAge.doubleValue() : null)
-                .lte(maxAge != null ? maxAge.doubleValue() : null)
-                .build();
-
-            filterQueries.add(new RangeQuery.Builder().number(ageRange).build()._toQuery());
-        }
-
-        // Price Range
-        if (minPrice != null || maxPrice != null) {
-            NumberRangeQuery priceRange = new NumberRangeQuery.Builder()
-                .field("price")
-                .gte(minPrice)
-                .lte(maxPrice)
-                .build();
-
-            filterQueries.add(new RangeQuery.Builder().number(priceRange).build()._toQuery());
-        }
-
-        // Start Date Filter
-        if (startDate != null) {
-            DateRangeQuery dateRange = new DateRangeQuery.Builder()
-                .field("nextSessionDate")
-                .gte(startDate.toString())
-                .build();
-
-            filterQueries.add(new RangeQuery.Builder().date(dateRange).build()._toQuery());
-        }
-
-        // Build the BoolQuery using must + filter
-        BoolQuery boolQuery = BoolQuery.of(b -> b
-            .must(mustQueries)
-            .filter(filterQueries)
-        );
-
-        // Create the NativeQuery
         NativeQuery query = NativeQuery.builder()
-            .withQuery(boolQuery._toQuery())
-            .withPageable(PageRequest.of(page, size))
-            .build();
+                .withQuery(boolQuery._toQuery())
+                .withPageable(PageRequest.of(page, size))
+                .build();
 
-        // Sorting
-        if ("priceAsc".equalsIgnoreCase(sort)) {
-            query.addSort(Sort.by("price").ascending());
-        } else if ("priceDesc".equalsIgnoreCase(sort)) {
-            query.addSort(Sort.by("price").descending());
-        } else {
-            query.addSort(Sort.by("nextSessionDate").ascending());
-        }
+        applySorting(query, sort);
 
-        // Execute the search
         SearchHits<CourseDocument> hits = elasticsearchOperations.search(query, CourseDocument.class);
         List<CourseDocument> results = hits.get().map(SearchHit::getContent).toList();
 
@@ -136,61 +57,112 @@ public class SearchService {
     }
 
     public List<String> suggestTitles(String q) {
-        // Build the suggester using Completion field
+        List<String> prefixSuggestions = runPrefixSuggester(q);
+        if (!prefixSuggestions.isEmpty()) {
+            return prefixSuggestions;
+        }
+        return runFuzzyFallback(q);
+    }
+
+    private List<Query> buildMustQueries(String q) {
+        List<Query> must = new ArrayList<>();
+        if (q != null && !q.isBlank()) {
+            Query fuzzyTitle = MatchQuery.of(m -> m.field("title").query(q).fuzziness("AUTO"))._toQuery();
+            Query normalDescription = MatchQuery.of(m -> m.field("description").query(q))._toQuery();
+            must.add(BoolQuery.of(b -> b.should(fuzzyTitle).should(normalDescription).minimumShouldMatch("1"))._toQuery());
+        }
+        return must;
+    }
+
+    private List<Query> buildFilterQueries(Integer minAge, Integer maxAge,
+                                           String category, String type,
+                                           Double minPrice, Double maxPrice,
+                                           Instant startDate) {
+        List<Query> filters = new ArrayList<>();
+
+        if (category != null && !category.isBlank()) {
+            filters.add(MatchQuery.of(m -> m.field("category").query(category))._toQuery());
+        }
+
+        if (type != null && !type.isBlank()) {
+            filters.add(MatchQuery.of(m -> m.field("type").query(type))._toQuery());
+        }
+
+        if (minAge != null || maxAge != null) {
+            NumberRangeQuery ageRange = new NumberRangeQuery.Builder()
+                    .field("minAge")
+                    .gte(minAge != null ? minAge.doubleValue() : null)
+                    .lte(maxAge != null ? maxAge.doubleValue() : null)
+                    .build();
+
+            filters.add(new RangeQuery.Builder().number(ageRange).build()._toQuery());
+        }
+
+        if (minPrice != null || maxPrice != null) {
+            NumberRangeQuery priceRange = new NumberRangeQuery.Builder()
+                    .field("price")
+                    .gte(minPrice)
+                    .lte(maxPrice)
+                    .build();
+
+            filters.add(new RangeQuery.Builder().number(priceRange).build()._toQuery());
+        }
+
+        if (startDate != null) {
+            DateRangeQuery dateRange = new DateRangeQuery.Builder()
+                    .field("nextSessionDate")
+                    .gte(startDate.toString())
+                    .build();
+
+            filters.add(new RangeQuery.Builder().date(dateRange).build()._toQuery());
+        }
+
+        return filters;
+    }
+
+    private void applySorting(NativeQuery query, String sort) {
+        if ("priceAsc".equalsIgnoreCase(sort)) {
+            query.addSort(Sort.by("price").ascending());
+        } else if ("priceDesc".equalsIgnoreCase(sort)) {
+            query.addSort(Sort.by("price").descending());
+        } else {
+            query.addSort(Sort.by("nextSessionDate").ascending());
+        }
+    }
+
+    private List<String> runPrefixSuggester(String q) {
         Suggester suggester = Suggester.of(s -> s
-                .text(q) // <-- prefix passed globally
+                .text(q)
                 .suggesters("title-suggest", FieldSuggester.of(fs -> fs
                         .completion(CompletionSuggester.of(cs -> cs
                                 .field("suggest")
                                 .skipDuplicates(true)
-                                .size(10)
-                        ))
-                ))
+                                .size(10)))))
         );
 
-        // Create NativeQuery with Suggester
-        NativeQuery query = NativeQuery.builder()
-                .withSuggester(suggester)
-                .build();
+        NativeQuery query = NativeQuery.builder().withSuggester(suggester).build();
+        SearchHits<CourseDocument> hits = elasticsearchOperations.search(query, CourseDocument.class);
 
-        // Perform the suggest query
-        SearchHits<CourseDocument> prefixHits = elasticsearchOperations.search(query, CourseDocument.class);
-
-        // Extract and flatten the suggestions
-        Suggest suggest = prefixHits.getSuggest();
-
-        List<String> prefixSuggestions = new ArrayList<>();
+        Suggest suggest = hits.getSuggest();
         if (suggest != null && suggest.getSuggestion("title-suggest") != null) {
-            prefixSuggestions = suggest.getSuggestion("title-suggest") // get the Suggestion object by name
-                    .getEntries()                         // get its entries
+            return suggest.getSuggestion("title-suggest")
+                    .getEntries()
                     .stream()
-                    .flatMap(entry -> entry.getOptions().stream()) // flatten all options
-                    .map(Suggest.Suggestion.Entry.Option::getText)               // extract the suggestion text
-                    .toList();
+                    .flatMap(entry -> entry.getOptions().stream())
+                    .map(Suggest.Suggestion.Entry.Option::getText)
+                    .collect(Collectors.toList());
         }
+        return List.of();
+    }
 
-        if (!prefixSuggestions.isEmpty()) {
-            return prefixSuggestions;
-        }
-
-        // Step 2: Fallback to fuzzy match if prefix-based suggestions are empty
-        Query fuzzyQuery = MatchQuery.of(m -> m
-                .field("title")
-                .query(q)
-                .fuzziness("AUTO")
-        )._toQuery();
-
-        NativeQuery fallbackQuery = NativeQuery.builder()
+    private List<String> runFuzzyFallback(String q) {
+        Query fuzzyQuery = MatchQuery.of(m -> m.field("title").query(q).fuzziness("AUTO"))._toQuery();
+        NativeQuery query = NativeQuery.builder()
                 .withQuery(fuzzyQuery)
                 .withPageable(PageRequest.of(0, 10))
                 .build();
 
-        SearchHits<CourseDocument> fallbackHits = elasticsearchOperations.search(fallbackQuery, CourseDocument.class);
-
-        return fallbackHits.get()
-                .map(SearchHit::getContent)
-                .map(CourseDocument::getTitle)
-                .toList();
+        SearchHits<CourseDocument> hits = elasticsearchOperations.search(query, CourseDocument.class);
+        return hits.get().map(SearchHit::getContent).map(CourseDocument::getTitle).toList();
     }
-
 }
