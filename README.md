@@ -53,7 +53,7 @@ Then run:
 docker-compose up -d
 ```
 
-Wait for Elasticsearch to be fully up at: [http://localhost:9200](http://localhost:9200)
+> Wait for Elasticsearch to be fully up at: [http://localhost:9200](http://localhost:9200)
 
 ### 🛠️ Step 2: Run Spring Boot Application
 
@@ -111,36 +111,36 @@ This allows date formats like:
 
 ## 🤞 Sample API Requests
 
-Base URL: `http://localhost:8080/api/v1/search`
+> #### Base URL: `http://localhost:8080/api/v1/search`
 
 ### 1. Full-text Search
 
 ```http
-GET /api/v1/search?q=science
+curl -X GET "http://localhost:8080/api/v1/search?q=science"
 ```
 
 ### 2. Filter by Category & Type
 
 ```http
-GET /api/v1/search?category=Technology&type=COURSE
+curl -X GET "http://localhost:8080/api/v1/search?category=Technology&type=COURSE"
 ```
 
 ### 3. Price Filter + Sorting
 
 ```http
-GET /api/v1/search?minPrice=300&maxPrice=800&sort=priceAsc
+curl -X GET "http://localhost:8080/api/v1/search?minPrice=300&maxPrice=800&sort=priceAsc"
 ```
 
 ### 4. Age Range + Upcoming Courses
 
 ```http
-GET /api/v1/search?minAge=8&maxAge=12&startDate=2025-08-01T00:00:00Z
+curl -X GET "http://localhost:8080/api/v1/search?minAge=8&maxAge=12&startDate=2025-08-01T00:00:00Z"
 ```
 
 ### 5. Pagination Example
 
 ```http
-GET /api/v1/search?q=math&page=1&size=5
+curl -X GET "http://localhost:8080/api/v1/search?q=math&page=1&size=5"
 ```
 
 ---
@@ -162,13 +162,47 @@ GET /api/v1/search?q=math&page=1&size=5
       "maxAge": 12,
       "price": 256.61,
       "nextSessionDate": "2025-07-24T17:41:52Z"
-    }
+    },
+    ...
   ]
 }
 ```
 
 ---
 
+## ✅ Features Implemented (Part B)
+- 🔍 Autocomplete on Course Title
+
+  * Endpoint: GET `http://localhost:8080/api/v1/search/suggest?q={partialTitle}`
+  * Uses completion suggester with fallback to fuzzy match if no prefix suggestions are found.
+  * Returns a list of suggested course titles (max 10 results).
+
+  ### Examples:
+  ```bash
+  curl -X GET "http://localhost:8080/api/v1/search/suggest?q=phy"
+  → ["Physics Experiments at Home", "Physics of Sports"]
+  
+  curl -X GET "http://localhost:8080/api/v1/search/suggest?q=beginnr"
+  → ["Beginner Guitar Lessons", "Beginner Robotics"]  (fuzzy fallback)
+  ```
+
+- ✨ Fuzzy Matching on Title Field
+
+  * Part of the main search endpoint: GET `http://localhost:8080/api/v1/search?q=...`
+  * Tolerates small typos in the title.
+  
+  ### Examples:
+  ```bash
+  curl -X GET "http://localhost:8080/api/v1/search?q=beginnr"
+  (if typo-matching enabled)
+  → Matches: [
+    "Beginner Robotics",
+    "Beginner Guitar Lessons",
+    "AI for Beginners"
+  ]
+  ```
+  
+--- 
 ## 📊 Tech Stack
 
 * Java 17
@@ -183,4 +217,4 @@ GET /api/v1/search?q=math&page=1&size=5
 
 * Verified all endpoints using Postman
 * Edge cases (blank query, page out of range, invalid sort param) tested
-* Optional integration tests (Testcontainers) not included in Part A
+* Optional integration tests (Testcontainers) not included
