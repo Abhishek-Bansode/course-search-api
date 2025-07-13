@@ -154,13 +154,14 @@ public class SearchService {
                 .build();
 
         // Perform the suggest query
-        SearchHits<CourseDocument> hits = elasticsearchOperations.search(query, CourseDocument.class);
+        SearchHits<CourseDocument> prefixHits = elasticsearchOperations.search(query, CourseDocument.class);
 
         // Extract and flatten the suggestions
-        Suggest suggest = hits.getSuggest();
+        Suggest suggest = prefixHits.getSuggest();
 
+        List<String> prefixSuggestions = new ArrayList<>();
         if (suggest != null && suggest.getSuggestion("title-suggest") != null) {
-            return suggest.getSuggestion("title-suggest") // get the Suggestion object by name
+            prefixSuggestions = suggest.getSuggestion("title-suggest") // get the Suggestion object by name
                     .getEntries()                         // get its entries
                     .stream()
                     .flatMap(entry -> entry.getOptions().stream()) // flatten all options
@@ -168,7 +169,28 @@ public class SearchService {
                     .toList();
         }
 
-        return List.of();
+        if (!prefixSuggestions.isEmpty()) {
+            return prefixSuggestions;
+        }
+
+        // Step 2: Fallback to fuzzy match if prefix-based suggestions are empty
+        Query fuzzyQuery = MatchQuery.of(m -> m
+                .field("title")
+                .query(q)
+                .fuzziness("AUTO")
+        )._toQuery();
+
+        NativeQuery fallbackQuery = NativeQuery.builder()
+                .withQuery(fuzzyQuery)
+                .withPageable(PageRequest.of(0, 10))
+                .build();
+
+        SearchHits<CourseDocument> fallbackHits = elasticsearchOperations.search(fallbackQuery, CourseDocument.class);
+
+        return fallbackHits.get()
+                .map(SearchHit::getContent)
+                .map(CourseDocument::getTitle)
+                .toList();
     }
 
 }
