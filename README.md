@@ -29,7 +29,7 @@ This Spring Boot application implements a **Course Search API** using **Elastics
 * Java 17+
 * Maven
 * Docker & Docker Compose
-
+* Make sure docker is up and running!
 ### 🚣 Step 1: Start Elasticsearch via Docker Compose
 
 Create a `docker-compose.yml` file at your project root:
